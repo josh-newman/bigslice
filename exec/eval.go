@@ -239,7 +239,6 @@ func (s *state) Enqueue(task *Task) (nwait int) {
 				}
 				s.add(dep.Head, task, n)
 				ready = false
-				continue
 			}
 			nwait++
 			if ready {
