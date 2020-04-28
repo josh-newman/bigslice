@@ -170,8 +170,7 @@ func Eval(ctx context.Context, executor Executor, roots []*Task, group *status.G
 // it does not require locking subgraphs.
 type state struct {
 	// deps and counts maintains the task waitlist.
-	deps   map[*Task]map[*Task]struct{}
-	counts map[*Task]int
+	deps map[*Task]map[*Task]struct{}
 
 	// todo is the set of tasks that are scheduled to be run. They are
 	// retrieved via the Runnable method.
@@ -193,7 +192,6 @@ type state struct {
 func newState() *state {
 	return &state{
 		deps:    make(map[*Task]map[*Task]struct{}),
-		counts:  make(map[*Task]int),
 		todo:    make(map[*Task]bool),
 		pending: make(map[*Task]bool),
 		wait:    make(map[*Task]int),
@@ -226,7 +224,6 @@ func (s *state) Enqueue(task *Task) (nwait int) {
 			s.schedule(task)
 			nwait++
 		case TaskInit, TaskLost:
-			s.clear(task)
 			ready := true
 			for _, dep := range task.Deps {
 				n := s.Enqueue(dep.Head)
@@ -265,8 +262,8 @@ func (s *state) Return(task *Task) {
 		msg := fmt.Sprintf("error running %s", task.Name)
 		s.err = errors.E(msg, task.err)
 	case TaskOk:
-		for _, task := range s.done(task.Head()) {
-			s.Enqueue(task)
+		for dst := range s.deps[task.Head()] {
+			s.Enqueue(dst)
 		}
 	case TaskLost:
 		// Re-enqueue immediately.
@@ -316,43 +313,13 @@ func (s *state) schedule(task *Task) {
 	s.todo[task] = true
 }
 
-// Clear the dependency information stored for task.
-func (s *state) clear(task *Task) {
-	delete(s.counts, task)
-	for _, dep := range task.Deps {
-		if d := s.deps[dep.Head]; d != nil {
-			delete(d, task)
-		}
-	}
-}
-
 // Add adds a dependency from the provided src to dst tasks.
 func (s *state) add(src, dst *Task, n int) {
 	if d := s.deps[src]; d == nil {
 		s.deps[src] = map[*Task]struct{}{dst: {}}
-		s.counts[dst] += n
 	} else if _, ok := d[dst]; !ok {
 		d[dst] = struct{}{}
-		s.counts[dst] += n
 	}
-}
-
-// Ready returns true if the provided task has no incoming
-// dependencies.
-func (s *state) ready(task *Task) bool {
-	return s.counts[task] == 0
-}
-
-// Done marks the provided task as done, and returns the set
-// of tasks that have consequently become ready for evaluation.
-func (s *state) done(src *Task) (ready []*Task) {
-	for dst := range s.deps[src] {
-		s.counts[dst]--
-		if s.counts[dst] == 0 {
-			ready = append(ready, dst)
-		}
-	}
-	return
 }
 
 // updateConsecutiveLost updates the accounting of consecutive task loss,
